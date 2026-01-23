@@ -9,6 +9,42 @@ cd Qwen3-TTS/finetuning
 
 Then follow the steps below to complete the entire fine-tuning workflow. Multi-speaker fine-tuning and other advanced fine-tuning features will be supported in future releases.
 
+### 0) Convert metadata.csv to JSONL format (for datasets with metadata.csv)
+
+If your dataset is in the format with a `metadata.csv` file and `wavs/` folder, you can use the conversion script to generate the required JSONL format.
+
+The `metadata.csv` file should have the format:
+```
+filename.wav|transcription text
+filename2.wav|transcription text 2
+```
+
+Example:
+```csv
+Maxim Gorky - Zindigi ki Shahrah par - part - 4 - میکسم گورکی زندگی کی شاھراہ پر- حصہ_0000.wav|میکسم گورکی کیا بیٹی زندگی کی شہرہ پر باب نمبر پانچ
+Maxim Gorky - Zindigi ki Shahrah par - part - 4 - میکسم گورکی زندگی کی شاھراہ پر- حصہ_0001.wav|میں موسم بہار میں آخر بہاگ ہی نکلا
+```
+
+Convert your dataset to JSONL format:
+
+```bash
+python convert_metadata_to_jsonl.py \
+  --dataset_dir /home/proxima/PROXIMA-AI/qwen\ tts\ train \
+  --metadata_file metadata.csv \
+  --wavs_folder wavs \
+  --output_jsonl train_raw.jsonl \
+  --ref_audio /path/to/reference/audio.wav
+```
+
+Arguments:
+- `--dataset_dir`: Root directory containing `metadata.csv` and `wavs/` folder
+- `--metadata_file`: Name of metadata file (default: `metadata.csv`)
+- `--wavs_folder`: Name of folder containing audio files (default: `wavs`)
+- `--output_jsonl`: Output JSONL file path (default: `train_raw.jsonl`)
+- `--ref_audio`: Optional path to reference audio file. If not provided, uses the first audio file in the dataset
+
+Note: The reference audio (`ref_audio`) should be a high-quality sample of the target speaker. It is recommended to use the same reference audio for all training samples to ensure speaker consistency.
+
 ### 1) Input JSONL format
 
 Prepare your training file as a JSONL (one JSON object per line). Each line must contain:
@@ -87,6 +123,8 @@ sf.write("output.wav", wavs[0], sr)
 
 ### One-click shell script example
 
+For datasets already in JSONL format:
+
 ```bash
 #!/usr/bin/env bash
 set -e
@@ -119,3 +157,57 @@ python sft_12hz.py \
   --num_epochs ${EPOCHS} \
   --speaker_name ${SPEAKER_NAME}
 ```
+
+For datasets with metadata.csv format (e.g., Urdu dataset):
+
+```bash
+#!/usr/bin/env bash
+set -e
+
+DEVICE="cuda:0"
+TOKENIZER_MODEL_PATH="Qwen/Qwen3-TTS-Tokenizer-12Hz"
+INIT_MODEL_PATH="Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+
+DATASET_DIR="/home/proxima/PROXIMA-AI/qwen tts train"
+RAW_JSONL="train_raw.jsonl"
+TRAIN_JSONL="train_with_codes.jsonl"
+OUTPUT_DIR="output"
+
+BATCH_SIZE=2
+LR=2e-5
+EPOCHS=3
+SPEAKER_NAME="urdu_speaker"
+
+# Step 1: Convert metadata.csv to JSONL format
+python convert_metadata_to_jsonl.py \
+  --dataset_dir "${DATASET_DIR}" \
+  --metadata_file metadata.csv \
+  --wavs_folder wavs \
+  --output_jsonl ${RAW_JSONL}
+
+# Step 2: Prepare data (extract audio_codes)
+python prepare_data.py \
+  --device ${DEVICE} \
+  --tokenizer_model_path ${TOKENIZER_MODEL_PATH} \
+  --input_jsonl ${RAW_JSONL} \
+  --output_jsonl ${TRAIN_JSONL}
+
+# Step 3: Fine-tune
+python sft_12hz.py \
+  --init_model_path ${INIT_MODEL_PATH} \
+  --output_model_path ${OUTPUT_DIR} \
+  --train_jsonl ${TRAIN_JSONL} \
+  --batch_size ${BATCH_SIZE} \
+  --lr ${LR} \
+  --num_epochs ${EPOCHS} \
+  --speaker_name ${SPEAKER_NAME}
+```
+
+### Dataset Requirements
+
+- Audio files should be in WAV format
+- Recommended audio sample rate: 24kHz (the model will handle resampling if needed)
+- Audio files should be mono channel
+- Ensure transcriptions match the audio content accurately
+- For best results, use consistent audio quality across all samples
+- Reference audio should be a clear, high-quality sample of the target speaker (recommended: 3-10 seconds)
